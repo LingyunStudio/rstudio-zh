@@ -1,14 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 chcp 65001 >nul
-title RStudio Desktop 一键还原官方原版工具 (零外部依赖版)
+title RStudio Desktop Restore Original Tool
 cd /d "%~dp0"
-
-echo ====================================================================
-echo   RStudio Desktop 一键还原官方原版 (Restore Original)
-echo   (直接调用 RStudio 内置 Node.js 引擎，无需安装 Python 或其他环境)
-echo ====================================================================
-echo.
 
 set "RS_DIR="
 
@@ -52,15 +46,15 @@ if "!RS_DIR!"=="" (
 
 :ASK_DIR
 if "!RS_DIR!"=="" (
-    echo [提示] 未能在默认路径自动检测到 RStudio。
-    set /p "USER_DIR=请输入 RStudio 安装目录 (例如 D:\RStudio，可直接将文件夹拖入此窗口后回车): "
+    echo [INFO] RStudio was not found in default locations.
+    set /p "USER_DIR=Please enter your RStudio folder path (e.g. D:\RStudio): "
     set "USER_DIR=!USER_DIR:"=!"
     if exist "!USER_DIR!\resources\app\www\rstudio\rstudio.nocache.js" (
         set "RS_DIR=!USER_DIR!"
     ) else if exist "!USER_DIR!\www\rstudio\rstudio.nocache.js" (
         set "RS_DIR=!USER_DIR!\..\.."
     ) else (
-        echo [错误] 在 "!USER_DIR!" 下未找到 RStudio 核心文件，请重新确认路径！
+        echo [ERROR] Could not find RStudio in "!USER_DIR!". Please try again.
         echo.
         goto ASK_DIR
     )

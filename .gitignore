@@ -1,6 +1,7 @@
-# Local RStudio backups (contains RStudio original bundles)
+# Local RStudio backups & release archives
 backup/
 .rstudio_zh_backup/
+*.zip
 
 # Python cache
 __pycache__/

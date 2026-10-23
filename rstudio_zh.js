@@ -307,6 +307,9 @@ function escapeRegExp(s) {
 }
 
 function cmdInstall(appDir) {
+  console.log('====================================================================');
+  console.log('  RStudio Desktop 简体中文 (zh_CN) 选项及全量汉化一键安装工具');
+  console.log('====================================================================');
   const gwtHash = detectGwtHash(appDir);
   console.log(`[Info] Found RStudio at: ${appDir}`);
   console.log(`[Info] Active GWT Permutation Hash: ${gwtHash}`);
@@ -531,6 +534,9 @@ function copyDirRecursive(srcRoot, dstRoot) {
 }
 
 function cmdRestore(appDir) {
+  console.log('====================================================================');
+  console.log('  RStudio Desktop 一键还原官方原版 (Restore Original)');
+  console.log('====================================================================');
   console.log(`[Info] Found RStudio at: ${appDir}`);
   const backupDir = path.join(appDir, '.rstudio_zh_backup');
   const localClean = path.join(REPO_DIR, 'backup', 'clean_baseline');

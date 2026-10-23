@@ -20,6 +20,97 @@ const readline = require('readline');
 
 const REPO_DIR = __dirname;
 const DICT_DIR = path.join(REPO_DIR, 'dictionaries');
+let LOG_FILE_PATH = null;
+
+function initLogFile(logPath) {
+  if (!logPath) return;
+  LOG_FILE_PATH = logPath;
+  const origLog = console.log.bind(console);
+  const origErr = console.error.bind(console);
+  console.log = (...args) => {
+    origLog(...args);
+    try {
+      fs.appendFileSync(LOG_FILE_PATH, args.join(' ') + '\n', 'utf8');
+    } catch (_) {}
+  };
+  console.error = (...args) => {
+    origErr(...args);
+    try {
+      fs.appendFileSync(LOG_FILE_PATH, args.join(' ') + '\n', 'utf8');
+    } catch (_) {}
+  };
+}
+
+function canWriteDir(dir) {
+  const testFile = path.join(dir, `.rstudio_zh_perm_${process.pid}`);
+  try {
+    fs.writeFileSync(testFile, 'ok', 'utf8');
+    fs.unlinkSync(testFile);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function runElevated(action, appDir) {
+  if (process.platform === 'win32') {
+    console.log(`\n[UAC] 检测到 RStudio 安装在系统受保护目录 (${appDir})，修改文件需要管理员权限。`);
+    console.log('[UAC] 正在请求 Windows 管理员授权，请在弹出的 UAC 窗口中点击“是 (Yes)”...\n');
+
+    const logFile = path.join(os.tmpdir(), `rstudio_zh_${Date.now()}_${process.pid}.log`);
+    const psEscape = s => s.replace(/'/g, "''");
+    const nodeExe = psEscape(process.execPath);
+    const scriptPath = psEscape(__filename);
+    const dirArg = psEscape(appDir);
+    const logArg = psEscape(logFile);
+
+    const psScript = [
+      `$argList = @('"${scriptPath}"', '${action}', '--dir', '"${dirArg}"', '--elevated', '--log-file', '"${logArg}"')`,
+      `$p = Start-Process -FilePath '${nodeExe}' -ArgumentList $argList -Verb RunAs -Wait -PassThru`,
+      `exit $p.ExitCode`
+    ].join('\n');
+
+    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+    let exitCode = 1;
+    try {
+      child_process.execSync(
+        `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`,
+        { stdio: ['ignore', 'inherit', 'ignore'] }
+      );
+      exitCode = 0;
+    } catch (err) {
+      exitCode = err.status || 1;
+    }
+
+    if (fs.existsSync(logFile)) {
+      try {
+        const content = fs.readFileSync(logFile, 'utf8');
+        if (content.trim()) {
+          console.log(content.trimEnd());
+        }
+        fs.unlinkSync(logFile);
+      } catch (_) {}
+    }
+
+    if (exitCode !== 0) {
+      console.error('\n[ERROR] 管理员权限授权被取消或执行失败 (UAC elevation failed)。');
+      console.error('提示：您也可以直接右键点击“一键安装中文(Install).bat”，选择“以管理员身份运行”。');
+      process.exit(exitCode);
+    }
+    return true;
+  } else {
+    console.log(`\n[Sudo] 检测到目录需要管理员权限 (${appDir})，正在通过 sudo 提权...`);
+    const res = child_process.spawnSync(
+      'sudo',
+      [process.execPath, __filename, action, '--dir', appDir, '--elevated'],
+      { stdio: 'inherit' }
+    );
+    if (res.status !== 0) {
+      process.exit(res.status || 1);
+    }
+    return true;
+  }
+}
 
 function findRStudioAppDir(customDir) {
   const candidates = [];
@@ -355,14 +446,27 @@ function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function cmdInstall(appDir) {
-  console.log('====================================================================');
-  console.log('  RStudio Desktop 简体中文 (zh_CN) 选项及全量汉化一键安装工具');
-  console.log('====================================================================');
+function cmdInstall(appDir, isElevated = false) {
+  if (!isElevated) {
+    console.log('====================================================================');
+    console.log('  RStudio Desktop 简体中文 (zh_CN) 选项及全量汉化一键安装工具');
+    console.log('====================================================================');
+  }
   ensureRStudioClosed();
   const gwtHash = detectGwtHash(appDir);
-  console.log(`[Info] Found RStudio at: ${appDir}`);
-  console.log(`[Info] Active GWT Permutation Hash: ${gwtHash}`);
+  if (!isElevated) {
+    console.log(`[Info] Found RStudio at: ${appDir}`);
+    console.log(`[Info] Active GWT Permutation Hash: ${gwtHash}`);
+  }
+
+  if (!canWriteDir(appDir)) {
+    if (isElevated) {
+      throw new Error(`权限不足，无法写入目录 (Permission denied writing to): ${appDir}`);
+    }
+    clearCachesAndSetPref('zh_CN');
+    runElevated('install', appDir);
+    return;
+  }
 
   const backupDir = ensureCleanBackup(appDir, gwtHash);
   const bySymbol = JSON.parse(fs.readFileSync(path.join(DICT_DIR, 'gwt_zh_CN_by_symbol.json'), 'utf8'));
@@ -592,12 +696,26 @@ function copyDirRecursive(srcRoot, dstRoot) {
   return count;
 }
 
-function cmdRestore(appDir) {
-  console.log('====================================================================');
-  console.log('  RStudio Desktop 一键还原官方原版 (Restore Original)');
-  console.log('====================================================================');
+function cmdRestore(appDir, isElevated = false) {
+  if (!isElevated) {
+    console.log('====================================================================');
+    console.log('  RStudio Desktop 一键还原官方原版 (Restore Original)');
+    console.log('====================================================================');
+  }
   ensureRStudioClosed();
-  console.log(`[Info] Found RStudio at: ${appDir}`);
+  if (!isElevated) {
+    console.log(`[Info] Found RStudio at: ${appDir}`);
+  }
+
+  if (!canWriteDir(appDir)) {
+    if (isElevated) {
+      throw new Error(`权限不足，无法写入目录 (Permission denied writing to): ${appDir}`);
+    }
+    clearCachesAndSetPref('en');
+    runElevated('restore', appDir);
+    return;
+  }
+
   const backupDir = path.join(appDir, '.rstudio_zh_backup');
   const localClean = path.join(REPO_DIR, 'backup', 'clean_baseline');
   const srcRoot = fs.existsSync(backupDir) ? backupDir : (fs.existsSync(localClean) ? localClean : null);
@@ -625,14 +743,22 @@ function main() {
   const args = process.argv.slice(2);
   let action = null;
   let customDir = null;
+  let isElevated = false;
+  let logFile = null;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--dir' && i + 1 < args.length) {
       customDir = args[++i];
+    } else if (args[i] === '--log-file' && i + 1 < args.length) {
+      logFile = args[++i];
+    } else if (args[i] === '--elevated') {
+      isElevated = true;
     } else if (['install', 'restore', 'status'].includes(args[i])) {
       action = args[i];
     }
   }
+
+  initLogFile(logFile);
 
   const appDir = findRStudioAppDir(customDir);
   if (!appDir) {
@@ -642,9 +768,9 @@ function main() {
   }
 
   if (action === 'install') {
-    cmdInstall(appDir);
+    cmdInstall(appDir, isElevated);
   } else if (action === 'restore') {
-    cmdRestore(appDir);
+    cmdRestore(appDir, isElevated);
   } else if (action === 'status') {
     cmdStatus(appDir);
   } else {
@@ -657,8 +783,8 @@ function main() {
     rl.question('\n请输入选项 (1/2/Q): ', answer => {
       rl.close();
       const ch = answer.trim().toLowerCase();
-      if (ch === '1') cmdInstall(appDir);
-      else if (ch === '2') cmdRestore(appDir);
+      if (ch === '1') cmdInstall(appDir, isElevated);
+      else if (ch === '2') cmdRestore(appDir, isElevated);
     });
   }
 }

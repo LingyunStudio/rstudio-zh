@@ -266,6 +266,61 @@ def load_symbol_map(app_dir, gwt_hash):
     return js_to_sym, cldr_js
 
 
+def can_write_dir(d):
+    test_file = os.path.join(d, f".rstudio_zh_perm_{os.getpid()}")
+    try:
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(test_file)
+        return True
+    except Exception:
+        return False
+
+
+def run_elevated(action, app_dir):
+    import base64
+    import subprocess
+    import tempfile
+    import time
+
+    if platform.system() == "Windows":
+        print(f"\n[UAC] 检测到 RStudio 安装在系统受保护目录 ({app_dir})，修改文件需要管理员权限。")
+        print("[UAC] 正在请求 Windows 管理员授权，请在弹出的 UAC 窗口中点击“是 (Yes)”...\n")
+        log_file = os.path.join(tempfile.gettempdir(), f"rstudio_zh_{int(time.time()*1000)}_{os.getpid()}.log")
+        ps_esc = lambda s: s.replace("'", "''")
+        py_exe = ps_esc(sys.executable)
+        script_p = ps_esc(os.path.abspath(__file__))
+        dir_arg = ps_esc(app_dir)
+        log_arg = ps_esc(log_file)
+        ps_script = "\n".join([
+            f'$argList = @(\'"{script_p}"\', \'{action}\', \'--dir\', \'"{dir_arg}"\', \'--elevated\', \'--log-file\', \'"{log_arg}"\')',
+            f"$p = Start-Process -FilePath '{py_exe}' -ArgumentList $argList -Verb RunAs -Wait -PassThru",
+            "exit $p.ExitCode",
+        ])
+        encoded = base64.b64encode(ps_script.encode("utf-16le")).decode("ascii")
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+            stdin=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if os.path.exists(log_file):
+            try:
+                content = open(log_file, "r", encoding="utf-8", errors="replace").read()
+                if content.strip():
+                    print(content.rstrip())
+                os.remove(log_file)
+            except Exception:
+                pass
+        if res.returncode != 0:
+            print("\n[ERROR] 管理员权限授权被取消或执行失败 (UAC elevation failed)。")
+            sys.exit(res.returncode or 1)
+    else:
+        print(f"\n[Sudo] 检测到目录需要管理员权限 ({app_dir})，正在通过 sudo 提权...")
+        res = subprocess.run(["sudo", sys.executable, os.path.abspath(__file__), action, "--dir", app_dir, "--elevated"])
+        if res.returncode != 0:
+            sys.exit(res.returncode or 1)
+
+
 def ensure_rstudio_closed():
     if platform.system() == "Windows":
         import subprocess
@@ -347,11 +402,19 @@ def clear_caches_and_set_pref(lang="zh_CN"):
         print(f"[Prefs] Set ui_language = '{lang}' in {prefs_path}")
 
 
-def cmd_install(app_dir):
+def cmd_install(app_dir, is_elevated=False):
     ensure_rstudio_closed()
     gwt_hash = detect_gwt_hash(app_dir)
-    print(f"[Info] Found RStudio at: {app_dir}")
-    print(f"[Info] Active GWT Permutation Hash: {gwt_hash}")
+    if not is_elevated:
+        print(f"[Info] Found RStudio at: {app_dir}")
+        print(f"[Info] Active GWT Permutation Hash: {gwt_hash}")
+
+    if not can_write_dir(app_dir):
+        if is_elevated:
+            raise RuntimeError(f"Permission denied writing to: {app_dir}")
+        clear_caches_and_set_pref("zh_CN")
+        run_elevated("install", app_dir)
+        return
 
     backup_dir = ensure_clean_backup(app_dir, gwt_hash)
     by_symbol = json.load(open(os.path.join(DICT_DIR, "gwt_zh_CN_by_symbol.json"), "r", encoding="utf-8"))
@@ -568,9 +631,18 @@ def cmd_install(app_dir):
     print("\n[SUCCESS] RStudio Simplified Chinese (zh_CN) localization installed successfully!")
 
 
-def cmd_restore(app_dir):
+def cmd_restore(app_dir, is_elevated=False):
     ensure_rstudio_closed()
-    print(f"[Info] Found RStudio at: {app_dir}")
+    if not is_elevated:
+        print(f"[Info] Found RStudio at: {app_dir}")
+
+    if not can_write_dir(app_dir):
+        if is_elevated:
+            raise RuntimeError(f"Permission denied writing to: {app_dir}")
+        clear_caches_and_set_pref("en")
+        run_elevated("restore", app_dir)
+        return
+
     backup_dir = os.path.join(app_dir, ".rstudio_zh_backup")
     local_clean = os.path.join(REPO_DIR, "backup", "clean_baseline")
     src_root = backup_dir if os.path.isdir(backup_dir) else (local_clean if os.path.isdir(local_clean) else None)
@@ -609,7 +681,21 @@ def main():
     parser = argparse.ArgumentParser(description="RStudio Desktop Simplified Chinese (zh_CN) Localization Tool")
     parser.add_argument("action", nargs="?", choices=["install", "restore", "status"], help="Action to perform")
     parser.add_argument("--dir", help="Path to RStudio installation directory (auto-detected if omitted)")
+    parser.add_argument("--elevated", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--log-file", help=argparse.SUPPRESS)
     args = parser.parse_args()
+
+    if args.log_file:
+        import builtins
+        orig_print = builtins.print
+        def tee_print(*p_args, **p_kwargs):
+            orig_print(*p_args, **p_kwargs)
+            try:
+                with open(args.log_file, "a", encoding="utf-8") as lf:
+                    orig_print(*p_args, file=lf)
+            except Exception:
+                pass
+        builtins.print = tee_print
 
     app_dir = find_rstudio_app_dir(args.dir)
     if not app_dir:
@@ -633,9 +719,9 @@ def main():
             return
 
     if action == "install":
-        cmd_install(app_dir)
+        cmd_install(app_dir, args.elevated)
     elif action == "restore":
-        cmd_restore(app_dir)
+        cmd_restore(app_dir, args.elevated)
     elif action == "status":
         cmd_status(app_dir)
 

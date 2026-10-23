@@ -375,10 +375,10 @@ def cmd_install(app_dir):
     nocache_dst = os.path.join(app_dir, "www", "rstudio", "rstudio.nocache.js")
     nocache_txt = open(nocache_src, "r", encoding="utf-8").read()
     target_nc = "p[Jb]=c;return b||Fb"
-    repl_nc = "p[Jb]=c;p.__zh=c.indexOf('zh')===0;return b||'en'"
+    repl_nc = "p[Jb]=c;p.__zh=c.indexOf('zh')===0;return b||Fb"
     if target_nc not in nocache_txt:
         raise RuntimeError("Could not locate locale return statement in rstudio.nocache.js")
-    nocache_txt = nocache_txt.replace("Fb='en'", "Fb='zh_CN'", 1)
+    nocache_txt = nocache_txt.replace("if(!b){b=p[Jb]}", 'if(!b){b=p[Jb]||"zh_CN";q.cookie="LOCALE="+b+";path=/"}', 1)
     nocache_txt = nocache_txt.replace(target_nc, repl_nc, 1)
     open(nocache_dst, "w", encoding="utf-8").write(nocache_txt)
     print("[2/5] Patched www/rstudio/rstudio.nocache.js (enabled LOCALE=zh_CN detection)")

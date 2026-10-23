@@ -386,11 +386,11 @@ function cmdInstall(appDir) {
   const nocacheDst = path.join(appDir, 'www', 'rstudio', 'rstudio.nocache.js');
   let nocacheTxt = fs.readFileSync(nocacheSrc, 'utf8');
   const targetNc = 'p[Jb]=c;return b||Fb';
-  const replNc = "p[Jb]=c;p.__zh=c.indexOf('zh')===0;return b||'en'";
+  const replNc = "p[Jb]=c;p.__zh=c.indexOf('zh')===0;return b||Fb";
   if (!nocacheTxt.includes(targetNc)) {
     throw new Error('Could not locate locale return statement in rstudio.nocache.js');
   }
-  nocacheTxt = nocacheTxt.replace("Fb='en'", "Fb='zh_CN'");
+  nocacheTxt = nocacheTxt.replace('if(!b){b=p[Jb]}', 'if(!b){b=p[Jb]||"zh_CN";q.cookie="LOCALE="+b+";path=/"}');
   nocacheTxt = nocacheTxt.replace(targetNc, replNc);
   fs.writeFileSync(nocacheDst, nocacheTxt, 'utf8');
   console.log('[2/5] Patched www/rstudio/rstudio.nocache.js (enabled LOCALE=zh_CN detection)');

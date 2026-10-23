@@ -25,29 +25,24 @@
 ## 🚀 快速开始（一键安装与还原）
 
 ### 前置条件
-- 已安装 **RStudio Desktop**（支持 `2026.x` / `2024.x` / `2025.x` 等包含 `www-symbolmaps` 的桌面版本）
-- 已安装 **Python 3.7+**（无需安装任何第三方依赖库，纯标准库实现）
-- **注意**：如果您的 RStudio 安装在 `C:\Program Files\RStudio` 等系统受保护目录，请**右键「以管理员身份运行」**批处理脚本或终端。
+- **仅需安装 RStudio Desktop**（**无需额外安装 Python、Node.js 或任何其他环境**！脚本会自动调用 RStudio 安装包内部自带的 `resources/app/bin/node/node.exe` 引擎完成全部操作）。
+- **注意**：如果您的 RStudio 安装在 `C:\Program Files\RStudio` 等系统受保护目录，请**右键「以管理员身份运行」**批处理脚本。
 
-### 方式一：Windows 双击一键运行
+### 方式一：Windows 双击一键运行（零环境依赖）
 1. 关闭正在运行的 RStudio。
-2. 双击运行仓库根目录下的 **[`一键安装中文(Install).bat`](一键安装中文(Install).bat)** 即可完成备份、汉化注入、`.gz` 同步重压缩与缓存清理，并自动将默认界面语言设为 `zh_CN`。
+2. 双击运行仓库根目录下的 **[`一键安装中文(Install).bat`](一键安装中文(Install).bat)** 即可自动检测 RStudio 安装路径（若安装在非常规路径会提示拖入文件夹），完成备份、汉化注入、`.gz` 同步重压缩与缓存清理，并自动将默认界面语言设为 `zh_CN`。
 3. 如需恢复官方原版，双击运行 **[`一键还原原版(Restore).bat`](一键还原原版(Restore).bat)** 即可。
 
-### 方式二：命令行运行（支持 Windows / macOS / Linux）
+### 方式二：命令行运行（支持 Node.js 或 Python）
 
 ```bash
-# 查看当前 RStudio 路径与汉化状态（自动检测安装目录）
-python rstudio_zh.py status
+# 直接使用 RStudio 内置 node（或系统 node / python）查看状态、安装或还原：
+"D:\RStudio\resources\app\bin\node\node.exe" rstudio_zh.js status
+"D:\RStudio\resources\app\bin\node\node.exe" rstudio_zh.js install
+"D:\RStudio\resources\app\bin\node\node.exe" rstudio_zh.js restore
 
-# 一键安装中文选项与全量汉化包
-python rstudio_zh.py install
-
-# 若安装在自定义路径且未被自动检测到，可通过 --dir 指定目录：
+# 若系统已安装 Python 也可使用 rstudio_zh.py：
 python rstudio_zh.py install --dir "D:\RStudio"
-
-# 一键还原为官方原版
-python rstudio_zh.py restore
 ```
 
 ---
@@ -82,9 +77,10 @@ flowchart LR
 
 ```text
 rstudio-zh/
-├── rstudio_zh.py                      # 跨平台一键安装 / 还原 / 状态检测主程序
-├── 一键安装中文(Install).bat           # Windows 一键安装批处理脚本
-├── 一键还原原版(Restore).bat           # Windows 一键还原批处理脚本
+├── 一键安装中文(Install).bat           # Windows 零依赖一键安装脚本 (自动调用 RStudio 内置 node.exe)
+├── 一键还原原版(Restore).bat           # Windows 零依赖一键还原脚本
+├── rstudio_zh.js                      # 核心汉化与还原引擎 (Node.js 版，由 RStudio 内置引擎直接执行)
+├── rstudio_zh.py                      # 核心汉化与还原引擎 (Python 备选版)
 ├── dictionaries/
 │   ├── gwt_zh_CN_by_symbol.json       # GWT 主界面全量词典 (6,057 条，按 Java 类名::方法名 索引)
 │   ├── electron_zh_CN.json            # Electron 主进程与独立窗口中文词典 (107 条)

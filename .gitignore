@@ -1,0 +1,14 @@
+# Local RStudio backups (contains RStudio original bundles)
+backup/
+.rstudio_zh_backup/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS & IDE metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

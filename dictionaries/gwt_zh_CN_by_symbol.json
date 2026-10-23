@@ -21761,7 +21761,7 @@
   },
   "org.rstudio.studio.client.workbench.views.source.ViewsSourceConstants::source": {
     "en": "Source",
-    "zh_CN": "源代码"
+    "zh_CN": "Source"
   },
   "org.rstudio.studio.client.workbench.views.source.ViewsSourceConstants::sourceColumn": {
     "en": "Source Column {0}",

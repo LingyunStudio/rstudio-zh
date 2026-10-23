@@ -266,22 +266,71 @@ def load_symbol_map(app_dir, gwt_hash):
     return js_to_sym, cldr_js
 
 
+def ensure_rstudio_closed():
+    if platform.system() == "Windows":
+        import subprocess
+        for proc in ("rstudio.exe", "rsession-utf8.exe", "rsession.exe"):
+            subprocess.run(["taskkill", "/F", "/IM", proc, "/T"], capture_output=True)
+
+
 def clear_caches_and_set_pref(lang="zh_CN"):
-    """Clear RStudio's Chromium web-cache and set ui_language in rstudio-prefs.json."""
+    """Clear RStudio's Chromium caches, repair state if needed, and set ui_language in rstudio-prefs.json."""
+    local_app_dir = ""
+    cache_dirs = []
     if platform.system() == "Windows":
         appdata = os.environ.get("APPDATA", "")
+        localappdata = os.environ.get("LOCALAPPDATA", "")
         config_dir = os.path.join(appdata, "RStudio") if appdata else ""
-        cache_dir = os.path.join(appdata, "RStudio", "web-cache") if appdata else ""
+        local_app_dir = os.path.join(localappdata, "RStudio") if localappdata else ""
+        if appdata:
+            cache_dirs = [
+                os.path.join(appdata, "RStudio", "web-cache"),
+                os.path.join(appdata, "RStudio", "Cache"),
+                os.path.join(appdata, "RStudio", "Code Cache"),
+                os.path.join(appdata, "RStudio", "Network", "Cookies"),
+                os.path.join(appdata, "RStudio", "Network", "Cookies-journal"),
+            ]
     elif platform.system() == "Darwin":
         config_dir = os.path.expanduser("~/.config/rstudio")
-        cache_dir = os.path.expanduser("~/Library/Application Support/RStudio/web-cache")
+        local_app_dir = os.path.expanduser("~/.local/share/rstudio")
+        app_sup = os.path.expanduser("~/Library/Application Support/RStudio")
+        cache_dirs = [
+            os.path.join(app_sup, "web-cache"),
+            os.path.join(app_sup, "Cache"),
+            os.path.join(app_sup, "Code Cache"),
+        ]
     else:
         config_dir = os.path.expanduser("~/.config/rstudio")
-        cache_dir = os.path.expanduser("~/.local/share/rstudio/web-cache")
+        local_app_dir = os.path.expanduser("~/.local/share/rstudio")
+        cache_dirs = [
+            os.path.join(local_app_dir, "web-cache"),
+            os.path.join(config_dir, "Cache"),
+            os.path.join(config_dir, "Code Cache"),
+        ]
 
-    if cache_dir and os.path.exists(cache_dir):
-        shutil.rmtree(cache_dir, ignore_errors=True)
-        print(f"[Cache] Cleared RStudio web-cache: {cache_dir}")
+    for cd in cache_dirs:
+        if cd and os.path.exists(cd):
+            try:
+                if os.path.isdir(cd):
+                    shutil.rmtree(cd, ignore_errors=True)
+                else:
+                    os.remove(cd)
+                print(f"[Cache] Cleared RStudio cache: {cd}")
+            except Exception:
+                pass
+
+    if local_app_dir:
+        scm_path = os.path.join(local_app_dir, "client-state", "source-column-manager.persistent")
+        if os.path.exists(scm_path):
+            try:
+                raw = open(scm_path, "r", encoding="utf-8").read()
+                if "源代码" in raw:
+                    fixed = {"column-info": {"names": ["Source"], "activeColumn": "Source"}}
+                    with open(scm_path, "w", encoding="utf-8") as f:
+                        json.dump(fixed, f, indent=4)
+                    print("[State] Repaired source-column-manager.persistent -> 'Source'")
+            except Exception:
+                pass
 
     if config_dir and lang:
         prefs_path = os.path.join(config_dir, "rstudio-prefs.json")
@@ -299,6 +348,7 @@ def clear_caches_and_set_pref(lang="zh_CN"):
 
 
 def cmd_install(app_dir):
+    ensure_rstudio_closed()
     gwt_hash = detect_gwt_hash(app_dir)
     print(f"[Info] Found RStudio at: {app_dir}")
     print(f"[Info] Active GWT Permutation Hash: {gwt_hash}")
@@ -325,9 +375,10 @@ def cmd_install(app_dir):
     nocache_dst = os.path.join(app_dir, "www", "rstudio", "rstudio.nocache.js")
     nocache_txt = open(nocache_src, "r", encoding="utf-8").read()
     target_nc = "p[Jb]=c;return b||Fb"
-    repl_nc = "p[Jb]=c;p.__zh=c.indexOf('zh')===0;return b||Fb"
+    repl_nc = "p[Jb]=c;p.__zh=c.indexOf('zh')===0;return b||'en'"
     if target_nc not in nocache_txt:
         raise RuntimeError("Could not locate locale return statement in rstudio.nocache.js")
+    nocache_txt = nocache_txt.replace("Fb='en'", "Fb='zh_CN'", 1)
     nocache_txt = nocache_txt.replace(target_nc, repl_nc, 1)
     open(nocache_dst, "w", encoding="utf-8").write(nocache_txt)
     print("[2/5] Patched www/rstudio/rstudio.nocache.js (enabled LOCALE=zh_CN detection)")
@@ -489,6 +540,14 @@ def cmd_install(app_dir):
         '"&Tools"===e?this.lastWasTools=!0:"Dia&gnostics"===e&&(this.lastWasDiagnostics=!0)',
         '("&Tools"===e||"工具(&T)"===e)?this.lastWasTools=!0:("Dia&gnostics"===e||"诊断(&G)"===e)&&(this.lastWasDiagnostics=!0)',
     )
+    wmain_txt = wmain_txt.replace(
+        '0===t.length?await r({name:"LOCALE",value:"en"},e)',
+        '0===t.length?await r({name:"LOCALE",value:"zh_CN"},e)',
+    )
+    wmain_txt = wmain_txt.replace(
+        'e(t,"File"),e(t,"Edit"),e(t,"Code"),e(t,"View"),e(t,"Plots"),e(t,"Session"),e(t,"Build"),e(t,"Debug"),e(t,"Profile"),e(t,"Tools"),"darwin"===process.platform&&e(t,"Window"),e(t,"Help")',
+        'e(t,"文件(&F)"),e(t,"编辑(&E)"),e(t,"代码(&C)"),e(t,"视图(&V)"),e(t,"绘图(&P)"),e(t,"会话(&S)"),e(t,"构建(&B)"),e(t,"调试(&D)"),e(t,"性能分析(&P)"),e(t,"工具(&T)"),"darwin"===process.platform&&e(t,"窗口(&W)"),e(t,"帮助(&H)")',
+    )
     open(wmain_dst, "w", encoding="utf-8").write(wmain_txt)
 
     for w in ("choose_r", "connect_window", "error_window", "loading_window"):
@@ -510,6 +569,7 @@ def cmd_install(app_dir):
 
 
 def cmd_restore(app_dir):
+    ensure_rstudio_closed()
     print(f"[Info] Found RStudio at: {app_dir}")
     backup_dir = os.path.join(app_dir, ".rstudio_zh_backup")
     local_clean = os.path.join(REPO_DIR, "backup", "clean_baseline")

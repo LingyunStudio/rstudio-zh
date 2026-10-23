@@ -263,28 +263,77 @@ function loadSymbolMap(appDir, gwtHash) {
   return { jsToSym, cldrJs };
 }
 
+function ensureRStudioClosed() {
+  if (process.platform === 'win32') {
+    for (const proc of ['rstudio.exe', 'rsession-utf8.exe', 'rsession.exe']) {
+      try {
+        child_process.execSync(`taskkill /F /IM ${proc} /T`, { stdio: 'ignore' });
+      } catch (_) {}
+    }
+  }
+}
+
 function clearCachesAndSetPref(lang) {
   let configDir = '';
-  let cacheDir = '';
+  let localAppDir = '';
+  const cacheDirs = [];
   if (process.platform === 'win32') {
     const appdata = process.env.APPDATA || '';
+    const localappdata = process.env.LOCALAPPDATA || '';
     if (appdata) {
       configDir = path.join(appdata, 'RStudio');
-      cacheDir = path.join(appdata, 'RStudio', 'web-cache');
+      cacheDirs.push(
+        path.join(appdata, 'RStudio', 'web-cache'),
+        path.join(appdata, 'RStudio', 'Cache'),
+        path.join(appdata, 'RStudio', 'Code Cache'),
+        path.join(appdata, 'RStudio', 'Network', 'Cookies'),
+        path.join(appdata, 'RStudio', 'Network', 'Cookies-journal')
+      );
+    }
+    if (localappdata) {
+      localAppDir = path.join(localappdata, 'RStudio');
     }
   } else if (process.platform === 'darwin') {
     configDir = path.join(os.homedir(), '.config', 'rstudio');
-    cacheDir = path.join(os.homedir(), 'Library', 'Application Support', 'RStudio', 'web-cache');
+    const appSup = path.join(os.homedir(), 'Library', 'Application Support', 'RStudio');
+    localAppDir = path.join(os.homedir(), '.local', 'share', 'rstudio');
+    cacheDirs.push(
+      path.join(appSup, 'web-cache'),
+      path.join(appSup, 'Cache'),
+      path.join(appSup, 'Code Cache')
+    );
   } else {
     configDir = path.join(os.homedir(), '.config', 'rstudio');
-    cacheDir = path.join(os.homedir(), '.local', 'share', 'rstudio', 'web-cache');
+    localAppDir = path.join(os.homedir(), '.local', 'share', 'rstudio');
+    cacheDirs.push(
+      path.join(localAppDir, 'web-cache'),
+      path.join(configDir, 'Cache'),
+      path.join(configDir, 'Code Cache')
+    );
   }
 
-  if (cacheDir && fs.existsSync(cacheDir)) {
-    try {
-      fs.rmSync(cacheDir, { recursive: true, force: true });
-      console.log(`[Cache] Cleared RStudio web-cache: ${cacheDir}`);
-    } catch (_) {}
+  for (const cd of cacheDirs) {
+    if (cd && fs.existsSync(cd)) {
+      try {
+        fs.rmSync(cd, { recursive: true, force: true });
+        console.log(`[Cache] Cleared RStudio cache: ${cd}`);
+      } catch (_) {}
+    }
+  }
+
+  // Ensure source-column-manager.persistent uses internal quadrant ID 'Source'
+  if (localAppDir) {
+    const scmPath = path.join(localAppDir, 'client-state', 'source-column-manager.persistent');
+    if (fs.existsSync(scmPath)) {
+      try {
+        const raw = fs.readFileSync(scmPath, 'utf8');
+        if (raw.includes('源代码')) {
+          const fixed = { 'column-info': { names: ['Source'], activeColumn: 'Source' } };
+          fs.writeFileSync(scmPath, JSON.stringify(fixed, null, 4), 'utf8');
+          console.log(`[State] Repaired source-column-manager.persistent -> 'Source'`);
+        }
+      } catch (_) {}
+    }
   }
 
   if (configDir && lang) {
@@ -310,6 +359,7 @@ function cmdInstall(appDir) {
   console.log('====================================================================');
   console.log('  RStudio Desktop 简体中文 (zh_CN) 选项及全量汉化一键安装工具');
   console.log('====================================================================');
+  ensureRStudioClosed();
   const gwtHash = detectGwtHash(appDir);
   console.log(`[Info] Found RStudio at: ${appDir}`);
   console.log(`[Info] Active GWT Permutation Hash: ${gwtHash}`);
@@ -336,10 +386,11 @@ function cmdInstall(appDir) {
   const nocacheDst = path.join(appDir, 'www', 'rstudio', 'rstudio.nocache.js');
   let nocacheTxt = fs.readFileSync(nocacheSrc, 'utf8');
   const targetNc = 'p[Jb]=c;return b||Fb';
-  const replNc = "p[Jb]=c;p.__zh=c.indexOf('zh')===0;return b||Fb";
+  const replNc = "p[Jb]=c;p.__zh=c.indexOf('zh')===0;return b||'en'";
   if (!nocacheTxt.includes(targetNc)) {
     throw new Error('Could not locate locale return statement in rstudio.nocache.js');
   }
+  nocacheTxt = nocacheTxt.replace("Fb='en'", "Fb='zh_CN'");
   nocacheTxt = nocacheTxt.replace(targetNc, replNc);
   fs.writeFileSync(nocacheDst, nocacheTxt, 'utf8');
   console.log('[2/5] Patched www/rstudio/rstudio.nocache.js (enabled LOCALE=zh_CN detection)');
@@ -496,6 +547,14 @@ function cmdInstall(appDir) {
     '"&Tools"===e?this.lastWasTools=!0:"Dia&gnostics"===e&&(this.lastWasDiagnostics=!0)',
     '("&Tools"===e||"工具(&T)"===e)?this.lastWasTools=!0:("Dia&gnostics"===e||"诊断(&G)"===e)&&(this.lastWasDiagnostics=!0)'
   );
+  wmainTxt = wmainTxt.replace(
+    '0===t.length?await r({name:"LOCALE",value:"en"},e)',
+    '0===t.length?await r({name:"LOCALE",value:"zh_CN"},e)'
+  );
+  wmainTxt = wmainTxt.replace(
+    'e(t,"File"),e(t,"Edit"),e(t,"Code"),e(t,"View"),e(t,"Plots"),e(t,"Session"),e(t,"Build"),e(t,"Debug"),e(t,"Profile"),e(t,"Tools"),"darwin"===process.platform&&e(t,"Window"),e(t,"Help")',
+    'e(t,"文件(&F)"),e(t,"编辑(&E)"),e(t,"代码(&C)"),e(t,"视图(&V)"),e(t,"绘图(&P)"),e(t,"会话(&S)"),e(t,"构建(&B)"),e(t,"调试(&D)"),e(t,"性能分析(&P)"),e(t,"工具(&T)"),"darwin"===process.platform&&e(t,"窗口(&W)"),e(t,"帮助(&H)")'
+  );
   fs.writeFileSync(wmainDst, wmainTxt, 'utf8');
 
   for (const w of ['choose_r', 'connect_window', 'error_window', 'loading_window']) {
@@ -537,6 +596,7 @@ function cmdRestore(appDir) {
   console.log('====================================================================');
   console.log('  RStudio Desktop 一键还原官方原版 (Restore Original)');
   console.log('====================================================================');
+  ensureRStudioClosed();
   console.log(`[Info] Found RStudio at: ${appDir}`);
   const backupDir = path.join(appDir, '.rstudio_zh_backup');
   const localClean = path.join(REPO_DIR, 'backup', 'clean_baseline');
